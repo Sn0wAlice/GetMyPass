@@ -35,14 +35,14 @@ fn handle_list_normal(app: &mut App, key: KeyEvent) {
             app.should_quit = true;
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            if !app.filtered_indices.is_empty() {
-                app.selected = (app.selected + 1) % app.filtered_indices.len();
+            if !app.list_rows.is_empty() {
+                app.selected = (app.selected + 1) % app.list_rows.len();
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            if !app.filtered_indices.is_empty() {
-                app.selected = (app.selected + app.filtered_indices.len() - 1)
-                    % app.filtered_indices.len();
+            if !app.list_rows.is_empty() {
+                app.selected = (app.selected + app.list_rows.len() - 1)
+                    % app.list_rows.len();
             }
         }
         KeyCode::Char('/') | KeyCode::Char('s') => {
@@ -50,10 +50,26 @@ fn handle_list_normal(app: &mut App, key: KeyEvent) {
             app.search_query.clear();
         }
         KeyCode::Enter => {
-            if app.selected_entry().is_some() {
+            if app.selected_is_folder() {
+                app.toggle_folder_collapse();
+            } else if app.selected_entry().is_some() {
                 app.show_password = false;
                 app.screen = Screen::ViewEntry;
             }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if app.selected_is_folder() {
+                app.navigate_into_folder();
+            } else if app.selected_entry().is_some() {
+                app.show_password = false;
+                app.screen = Screen::ViewEntry;
+            }
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            app.navigate_up_folder();
+        }
+        KeyCode::Backspace => {
+            app.navigate_up_folder();
         }
         KeyCode::Char('n') => {
             app.start_new_entry(EntryKind::Password);
@@ -62,8 +78,10 @@ fn handle_list_normal(app: &mut App, key: KeyEvent) {
             app.start_new_entry(EntryKind::Note);
         }
         KeyCode::Char('e') => {
-            app.show_password = true;
-            app.start_edit_entry();
+            if app.selected_entry().is_some() {
+                app.show_password = true;
+                app.start_edit_entry();
+            }
         }
         KeyCode::Char('d') => {
             if app.selected_entry().is_some() {
@@ -103,6 +121,13 @@ fn handle_list_search(app: &mut App, key: KeyEvent) {
             app.input_mode = InputMode::Normal;
             if app.filtered_indices.len() == 1 {
                 app.selected = 0;
+                // Find the row that is the entry
+                for (i, row) in app.list_rows.iter().enumerate() {
+                    if matches!(row, crate::app::ListRow::Entry(_)) {
+                        app.selected = i;
+                        break;
+                    }
+                }
                 app.show_password = false;
                 app.screen = Screen::ViewEntry;
             }
@@ -116,14 +141,14 @@ fn handle_list_search(app: &mut App, key: KeyEvent) {
             app.update_filter();
         }
         KeyCode::Down => {
-            if !app.filtered_indices.is_empty() {
-                app.selected = (app.selected + 1) % app.filtered_indices.len();
+            if !app.list_rows.is_empty() {
+                app.selected = (app.selected + 1) % app.list_rows.len();
             }
         }
         KeyCode::Up => {
-            if !app.filtered_indices.is_empty() {
-                app.selected = (app.selected + app.filtered_indices.len() - 1)
-                    % app.filtered_indices.len();
+            if !app.list_rows.is_empty() {
+                app.selected = (app.selected + app.list_rows.len() - 1)
+                    % app.list_rows.len();
             }
         }
         _ => {}

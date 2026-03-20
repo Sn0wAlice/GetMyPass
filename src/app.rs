@@ -19,6 +19,7 @@ pub enum InputMode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryField {
+    Folder,
     Name,
     Username,
     Password,
@@ -29,6 +30,7 @@ pub enum EntryField {
 impl EntryField {
     pub fn all_password() -> &'static [EntryField] {
         &[
+            EntryField::Folder,
             EntryField::Name,
             EntryField::Username,
             EntryField::Password,
@@ -38,11 +40,12 @@ impl EntryField {
     }
 
     pub fn all_note() -> &'static [EntryField] {
-        &[EntryField::Name, EntryField::Notes]
+        &[EntryField::Folder, EntryField::Name, EntryField::Notes]
     }
 
     pub fn label(&self) -> &str {
         match self {
+            EntryField::Folder => "Folder",
             EntryField::Name => "Name",
             EntryField::Username => "Username",
             EntryField::Password => "Password",
@@ -52,6 +55,13 @@ impl EntryField {
     }
 }
 
+/// Represents a row in the list view — either a folder header or an entry
+#[derive(Debug, Clone)]
+pub enum ListRow {
+    Folder(String),       // folder path
+    Entry(usize),         // index into vault.entries
+}
+
 pub struct App {
     pub vault: Vault,
     pub master_password: String,
@@ -59,6 +69,7 @@ pub struct App {
     pub input_mode: InputMode,
     pub search_query: String,
     pub filtered_indices: Vec<usize>,
+    pub list_rows: Vec<ListRow>,
     pub selected: usize,
     pub edit_buffer: Entry,
     pub edit_is_new: bool,
@@ -67,6 +78,9 @@ pub struct App {
     pub status_message: Option<(String, Instant)>,
     pub should_quit: bool,
     pub dirty: bool,
+    // Folder navigation
+    pub current_folder: String, // "" = root, "Work" = Work folder, "Work/Email" = subfolder
+    pub collapsed_folders: Vec<String>,
     // Password generator state
     pub gen_length: usize,
     pub gen_uppercase: bool,
@@ -85,6 +99,7 @@ impl App {
             input_mode: InputMode::Normal,
             search_query: String::new(),
             filtered_indices: Vec::new(),
+            list_rows: Vec::new(),
             selected: 0,
             edit_buffer: Entry::new_password(),
             edit_is_new: true,
@@ -93,6 +108,8 @@ impl App {
             status_message: None,
             should_quit: false,
             dirty: false,
+            current_folder: String::new(),
+            collapsed_folders: Vec::new(),
             gen_length: 20,
             gen_uppercase: true,
             gen_lowercase: true,
@@ -105,9 +122,10 @@ impl App {
     }
 
     pub fn update_filter(&mut self) {
-        if self.search_query.is_empty() {
-            self.filtered_indices = (0..self.vault.entries.len()).collect();
-        } else {
+        let is_searching = !self.search_query.is_empty();
+
+        if is_searching {
+            // In search mode: flat list, no folders
             self.filtered_indices = self
                 .vault
                 .entries
@@ -116,20 +134,154 @@ impl App {
                 .filter(|(_, e)| e.matches(&self.search_query))
                 .map(|(i, _)| i)
                 .collect();
+            self.list_rows = self
+                .filtered_indices
+                .iter()
+                .map(|&i| ListRow::Entry(i))
+                .collect();
+        } else {
+            // Folder-based view
+            self.build_folder_rows();
         }
-        if self.selected >= self.filtered_indices.len() {
-            self.selected = self.filtered_indices.len().saturating_sub(1);
+
+        if self.selected >= self.list_rows.len() {
+            self.selected = self.list_rows.len().saturating_sub(1);
+        }
+    }
+
+    fn build_folder_rows(&mut self) {
+        let mut rows: Vec<ListRow> = Vec::new();
+        let mut seen_folders: Vec<String> = Vec::new();
+
+        // Collect entries matching current folder view
+        // Sort entries: folders first (alphabetically), then entries alphabetically
+        let mut folder_entries: Vec<(String, usize)> = Vec::new();
+        let mut direct_subfolders: Vec<String> = Vec::new();
+
+        for (i, entry) in self.vault.entries.iter().enumerate() {
+            if self.current_folder.is_empty() {
+                // Root level: show entries with no folder and first-level folder headers
+                if entry.folder.is_empty() {
+                    folder_entries.push((String::new(), i));
+                } else {
+                    let top = entry.folder.split('/').next().unwrap_or("").to_string();
+                    if !direct_subfolders.contains(&top) {
+                        direct_subfolders.push(top);
+                    }
+                    // Show entries if folder is not collapsed
+                    if !self.is_folder_collapsed(&top_folder(&entry.folder)) {
+                        folder_entries.push((entry.folder.clone(), i));
+                    }
+                }
+            } else {
+                // Inside a folder: show entries in this folder and subfolders
+                if entry.folder == self.current_folder {
+                    folder_entries.push((entry.folder.clone(), i));
+                } else if entry.folder.starts_with(&format!("{}/", self.current_folder)) {
+                    let remainder = &entry.folder[self.current_folder.len() + 1..];
+                    let sub = remainder.split('/').next().unwrap_or("").to_string();
+                    let full_sub = format!("{}/{}", self.current_folder, sub);
+                    if !direct_subfolders.contains(&full_sub) {
+                        direct_subfolders.push(full_sub);
+                    }
+                    if !self.is_folder_collapsed(&entry.folder) {
+                        folder_entries.push((entry.folder.clone(), i));
+                    }
+                }
+            }
+        }
+
+        direct_subfolders.sort();
+
+        // Add subfolder headers and their entries
+        for subfolder in &direct_subfolders {
+            rows.push(ListRow::Folder(subfolder.clone()));
+            seen_folders.push(subfolder.clone());
+
+            if !self.is_folder_collapsed(subfolder) {
+                // Add entries in this subfolder (and nested)
+                let mut sub_entries: Vec<usize> = folder_entries
+                    .iter()
+                    .filter(|(f, _)| f == subfolder || f.starts_with(&format!("{}/", subfolder)))
+                    .map(|(_, i)| *i)
+                    .collect();
+                sub_entries.sort_by(|a, b| {
+                    self.vault.entries[*a]
+                        .name
+                        .to_lowercase()
+                        .cmp(&self.vault.entries[*b].name.to_lowercase())
+                });
+                for idx in sub_entries {
+                    rows.push(ListRow::Entry(idx));
+                }
+            }
+        }
+
+        // Add root-level entries (no folder)
+        let mut root_entries: Vec<usize> = folder_entries
+            .iter()
+            .filter(|(f, _)| {
+                if self.current_folder.is_empty() {
+                    f.is_empty()
+                } else {
+                    *f == self.current_folder
+                }
+            })
+            .map(|(_, i)| *i)
+            .collect();
+        root_entries.sort_by(|a, b| {
+            self.vault.entries[*a]
+                .name
+                .to_lowercase()
+                .cmp(&self.vault.entries[*b].name.to_lowercase())
+        });
+        for idx in root_entries {
+            rows.push(ListRow::Entry(idx));
+        }
+
+        self.list_rows = rows;
+        self.filtered_indices = self
+            .list_rows
+            .iter()
+            .filter_map(|r| match r {
+                ListRow::Entry(i) => Some(*i),
+                _ => None,
+            })
+            .collect();
+    }
+
+    fn is_folder_collapsed(&self, folder: &str) -> bool {
+        self.collapsed_folders.iter().any(|f| f == folder)
+    }
+
+    pub fn toggle_folder_collapse(&mut self) {
+        if let Some(ListRow::Folder(folder)) = self.list_rows.get(self.selected) {
+            let folder = folder.clone();
+            if let Some(pos) = self.collapsed_folders.iter().position(|f| *f == folder) {
+                self.collapsed_folders.remove(pos);
+            } else {
+                self.collapsed_folders.push(folder);
+            }
+            self.update_filter();
         }
     }
 
     pub fn selected_entry(&self) -> Option<&Entry> {
-        self.filtered_indices
-            .get(self.selected)
-            .and_then(|&i| self.vault.entries.get(i))
+        match self.list_rows.get(self.selected) {
+            Some(ListRow::Entry(i)) => self.vault.entries.get(*i),
+            _ => None,
+        }
     }
 
     pub fn selected_entry_index(&self) -> Option<usize> {
-        self.filtered_indices.get(self.selected).copied()
+        match self.list_rows.get(self.selected) {
+            Some(ListRow::Entry(i)) => Some(*i),
+            _ => None,
+        }
+    }
+
+    pub fn selected_is_folder(&self) -> bool {
+        matches!(self.list_rows.get(self.selected), Some(ListRow::Folder(_)))
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
@@ -149,6 +301,8 @@ impl App {
             EntryKind::Password => Entry::new_password(),
             EntryKind::Note => Entry::new_note(),
         };
+        // Pre-fill folder with current folder
+        self.edit_buffer.folder = self.current_folder.clone();
         self.edit_is_new = true;
         self.active_field = 0;
         self.screen = Screen::EditEntry;
@@ -166,6 +320,24 @@ impl App {
     }
 
     pub fn save_edit(&mut self) {
+        // Validate folder depth (max 3 levels)
+        let depth = if self.edit_buffer.folder.is_empty() {
+            0
+        } else {
+            self.edit_buffer.folder.matches('/').count() + 1
+        };
+        if depth > 3 {
+            self.set_status("Folder depth limited to 3 levels");
+            return;
+        }
+
+        // Clean up folder path (remove trailing/leading slashes)
+        self.edit_buffer.folder = self
+            .edit_buffer
+            .folder
+            .trim_matches('/')
+            .to_string();
+
         self.edit_buffer.modified_at = chrono::Utc::now().timestamp();
         if self.edit_is_new {
             self.vault.entries.push(self.edit_buffer.clone());
@@ -204,6 +376,7 @@ impl App {
 
     pub fn get_field_value(&self, field: &EntryField) -> &str {
         match field {
+            EntryField::Folder => &self.edit_buffer.folder,
             EntryField::Name => &self.edit_buffer.name,
             EntryField::Username => &self.edit_buffer.username,
             EntryField::Password => &self.edit_buffer.password,
@@ -214,6 +387,7 @@ impl App {
 
     pub fn get_field_value_mut(&mut self, field: &EntryField) -> &mut String {
         match field {
+            EntryField::Folder => &mut self.edit_buffer.folder,
             EntryField::Name => &mut self.edit_buffer.name,
             EntryField::Username => &mut self.edit_buffer.username,
             EntryField::Password => &mut self.edit_buffer.password,
@@ -266,4 +440,29 @@ impl App {
             .map(|_| chars[rng.gen_range(0..chars.len())])
             .collect()
     }
+
+    pub fn navigate_into_folder(&mut self) {
+        if let Some(ListRow::Folder(folder)) = self.list_rows.get(self.selected) {
+            self.current_folder = folder.clone();
+            self.selected = 0;
+            self.update_filter();
+        }
+    }
+
+    pub fn navigate_up_folder(&mut self) {
+        if self.current_folder.is_empty() {
+            return;
+        }
+        if let Some(pos) = self.current_folder.rfind('/') {
+            self.current_folder = self.current_folder[..pos].to_string();
+        } else {
+            self.current_folder = String::new();
+        }
+        self.selected = 0;
+        self.update_filter();
+    }
+}
+
+fn top_folder(folder: &str) -> String {
+    folder.split('/').next().unwrap_or("").to_string()
 }

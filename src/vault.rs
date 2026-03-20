@@ -24,6 +24,7 @@ pub enum EntryKind {
 pub struct Entry {
     pub id: Uuid,
     pub kind: EntryKind,
+    pub folder: String, // e.g. "Work/Email" or "" for root
     pub name: String,
     pub username: String,
     pub password: String,
@@ -39,6 +40,7 @@ impl Entry {
         Self {
             id: Uuid::new_v4(),
             kind: EntryKind::Password,
+            folder: String::new(),
             name: String::new(),
             username: String::new(),
             password: String::new(),
@@ -54,6 +56,7 @@ impl Entry {
         Self {
             id: Uuid::new_v4(),
             kind: EntryKind::Note,
+            folder: String::new(),
             name: String::new(),
             username: String::new(),
             password: String::new(),
@@ -70,6 +73,25 @@ impl Entry {
             || self.username.to_lowercase().contains(&q)
             || self.url.to_lowercase().contains(&q)
             || self.notes.to_lowercase().contains(&q)
+            || self.folder.to_lowercase().contains(&q)
+    }
+
+    /// Returns folder depth (0 = root, max 3)
+    pub fn folder_depth(&self) -> usize {
+        if self.folder.is_empty() {
+            0
+        } else {
+            self.folder.matches('/').count() + 1
+        }
+    }
+
+    /// Returns the display path: "folder/name" or just "name"
+    pub fn display_path(&self) -> String {
+        if self.folder.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}/{}", self.folder, self.name)
+        }
     }
 }
 
@@ -83,6 +105,35 @@ impl Vault {
         Self {
             entries: Vec::new(),
         }
+    }
+
+    /// Collect all unique folders used in the vault
+    pub fn folders(&self) -> Vec<String> {
+        let mut folders: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|e| !e.folder.is_empty())
+            .map(|e| e.folder.clone())
+            .collect();
+        folders.sort();
+        folders.dedup();
+        // Also add parent folders
+        let mut all: Vec<String> = Vec::new();
+        for f in &folders {
+            let parts: Vec<&str> = f.split('/').collect();
+            let mut path = String::new();
+            for (i, part) in parts.iter().enumerate() {
+                if i > 0 {
+                    path.push('/');
+                }
+                path.push_str(part);
+                if !all.contains(&path) {
+                    all.push(path.clone());
+                }
+            }
+        }
+        all.sort();
+        all
     }
 }
 
