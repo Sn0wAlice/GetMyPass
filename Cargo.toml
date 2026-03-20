@@ -1,0 +1,24 @@
+[package]
+name = "getmypass"
+version = "0.1.0"
+edition = "2021"
+description = "A simple TUI password manager"
+
+[[bin]]
+name = "gmp"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+rpassword = "7"
+dirs = "5"
+arboard = "3"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
