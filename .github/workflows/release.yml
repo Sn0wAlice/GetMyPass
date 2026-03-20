@@ -19,15 +19,15 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            name: gmp-linux-amd64
+            name: gmpass-linux-amd64
             deb_arch: amd64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            name: gmp-linux-arm64
+            name: gmpass-linux-arm64
             deb_arch: arm64
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: gmp-darwin-arm64
+            name: gmpass-darwin-arm64
             deb_arch: ""
     runs-on: ${{ matrix.os }}
     steps:
@@ -59,7 +59,7 @@ jobs:
       - name: Package binary
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../${{ matrix.name }}.tar.gz gmp
+          tar czf ../../../${{ matrix.name }}.tar.gz gmpass
           cd ../../..
 
       - name: Build .deb package
@@ -67,7 +67,7 @@ jobs:
         run: |
           VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           bash scripts/build-deb.sh \
-            target/${{ matrix.target }}/release/gmp \
+            target/${{ matrix.target }}/release/gmpass \
             ${{ matrix.deb_arch }} \
             "$VERSION"
 
@@ -82,7 +82,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}-deb
-          path: gmp_*.deb
+          path: gmpass_*.deb
 
   release:
     needs: build
@@ -104,17 +104,16 @@ jobs:
       - name: Compute sha256 hashes
         id: hashes
         run: |
-          echo "darwin_arm64=$(sha256sum artifacts/gmp-darwin-arm64/gmp-darwin-arm64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "darwin_amd64=$(sha256sum artifacts/gmp-darwin-amd64/gmp-darwin-amd64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "linux_amd64=$(sha256sum artifacts/gmp-linux-amd64/gmp-linux-amd64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "linux_arm64=$(sha256sum artifacts/gmp-linux-arm64/gmp-linux-arm64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "deb_amd64=$(sha256sum artifacts/gmp-linux-amd64-deb/gmp_*_amd64.deb | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "deb_arm64=$(sha256sum artifacts/gmp-linux-arm64-deb/gmp_*_arm64.deb | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "darwin_arm64=$(sha256sum artifacts/gmpass-darwin-arm64/gmpass-darwin-arm64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux_amd64=$(sha256sum artifacts/gmpass-linux-amd64/gmpass-linux-amd64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux_arm64=$(sha256sum artifacts/gmpass-linux-arm64/gmpass-linux-arm64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "deb_amd64=$(sha256sum artifacts/gmpass-linux-amd64-deb/gmpass_*_amd64.deb | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "deb_arm64=$(sha256sum artifacts/gmpass-linux-arm64-deb/gmpass_*_arm64.deb | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Generate Homebrew Formula
         run: |
-          cat > Formula/gmp.rb << 'FORMULA'
-          class Gmp < Formula
+          cat > Formula/gmpass.rb << 'FORMULA'
+          class Gmpass < Formula
             desc "Simple, fast TUI password manager with AES-256-GCM encryption"
             homepage "https://github.com/Sn0wAlice/GetMyPass"
             version "${{ steps.version.outputs.version }}"
@@ -122,40 +121,37 @@ jobs:
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmp-darwin-arm64.tar.gz"
+                url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmpass-darwin-arm64.tar.gz"
                 sha256 "${{ steps.hashes.outputs.darwin_arm64 }}"
-              elsif Hardware::CPU.intel?
-                url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmp-darwin-amd64.tar.gz"
-                sha256 "${{ steps.hashes.outputs.darwin_amd64 }}"
               end
             end
 
             on_linux do
               if Hardware::CPU.intel?
-                url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmp-linux-amd64.tar.gz"
+                url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmpass-linux-amd64.tar.gz"
                 sha256 "${{ steps.hashes.outputs.linux_amd64 }}"
               elsif Hardware::CPU.arm?
-                url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmp-linux-arm64.tar.gz"
+                url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmpass-linux-arm64.tar.gz"
                 sha256 "${{ steps.hashes.outputs.linux_arm64 }}"
               end
             end
 
             def install
-              bin.install "gmp"
+              bin.install "gmpass"
             end
 
             test do
-              assert_match version.to_s, shell_output("#{bin}/gmp --version", 0)
+              assert_match version.to_s, shell_output("#{bin}/gmpass --version", 0)
             end
           end
           FORMULA
-          sed -i 's/^          //' Formula/gmp.rb
+          sed -i 's/^          //' Formula/gmpass.rb
 
       - name: Push updated formula
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/gmp.rb
+          git add Formula/gmpass.rb
           git commit -m "chore: update Homebrew formula to v${{ steps.version.outputs.version }}" || true
           git push origin HEAD:main
 
@@ -166,9 +162,8 @@ jobs:
           name: GetMyPass v${{ steps.version.outputs.version }}
           generate_release_notes: true
           files: |
-            artifacts/gmp-darwin-arm64/*.tar.gz
-            artifacts/gmp-darwin-amd64/*.tar.gz
-            artifacts/gmp-linux-amd64/*.tar.gz
-            artifacts/gmp-linux-arm64/*.tar.gz
-            artifacts/gmp-linux-amd64-deb/*.deb
-            artifacts/gmp-linux-arm64-deb/*.deb
+            artifacts/gmpass-darwin-arm64/*.tar.gz
+            artifacts/gmpass-linux-amd64/*.tar.gz
+            artifacts/gmpass-linux-arm64/*.tar.gz
+            artifacts/gmpass-linux-amd64-deb/*.deb
+            artifacts/gmpass-linux-arm64-deb/*.deb

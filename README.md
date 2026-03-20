@@ -25,7 +25,7 @@ Works on **Linux** and **macOS**.
 
 ```bash
 brew tap Sn0wAlice/GetMyPass https://github.com/Sn0wAlice/GetMyPass
-brew install gmp
+brew install gmpass
 ```
 
 ### Debian / Ubuntu (.deb)
@@ -34,12 +34,12 @@ Download the latest `.deb` from [Releases](https://github.com/Sn0wAlice/GetMyPas
 
 ```bash
 # amd64
-wget https://github.com/Sn0wAlice/GetMyPass/releases/latest/download/gmp_0.1.0_amd64.deb
-sudo dpkg -i gmp_0.1.0_amd64.deb
+wget https://github.com/Sn0wAlice/GetMyPass/releases/latest/download/gmpass_0.1.0_amd64.deb
+sudo dpkg -i gmpass_0.1.0_amd64.deb
 
 # arm64
-wget https://github.com/Sn0wAlice/GetMyPass/releases/latest/download/gmp_0.1.0_arm64.deb
-sudo dpkg -i gmp_0.1.0_arm64.deb
+wget https://github.com/Sn0wAlice/GetMyPass/releases/latest/download/gmpass_0.1.0_arm64.deb
+sudo dpkg -i gmpass_0.1.0_arm64.deb
 ```
 
 ### Download binary
@@ -47,8 +47,8 @@ sudo dpkg -i gmp_0.1.0_arm64.deb
 Grab the tarball for your platform from [Releases](https://github.com/Sn0wAlice/GetMyPass/releases), extract, and move to your PATH:
 
 ```bash
-tar xzf gmp-darwin-arm64.tar.gz
-sudo mv gmp /usr/local/bin/
+tar xzf gmpass-darwin-arm64.tar.gz
+sudo mv gmpass /usr/local/bin/
 ```
 
 ### Build from source
@@ -57,13 +57,13 @@ sudo mv gmp /usr/local/bin/
 git clone https://github.com/Sn0wAlice/GetMyPass.git
 cd GetMyPass
 cargo build --release
-sudo cp target/release/gmp /usr/local/bin/
+sudo cp target/release/gmpass /usr/local/bin/
 ```
 
 ## Usage
 
 ```bash
-gmp
+gmpass
 ```
 
 On first launch, you'll be asked to create a master password. This password encrypts your vault — **don't lose it**, there is no recovery.

@@ -22,7 +22,7 @@ fn main() {
     // Handle --version flag
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
-        println!("gmp {}", VERSION);
+        println!("gmpass {}", VERSION);
         return;
     }
 
