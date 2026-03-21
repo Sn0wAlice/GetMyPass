@@ -1,23 +1,23 @@
 class Gmpass < Formula
   desc "Simple, fast TUI password manager with AES-256-GCM encryption"
   homepage "https://github.com/Sn0wAlice/GetMyPass"
-  version "0.4.0"
+  version "0.5.0"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmpass-darwin-arm64.tar.gz"
-      sha256 "1aae44f28125399f40b7a490e9449a19a8401920d9bdee5b33af30bcbb631dd5"
+      sha256 "8b836f8219b2689c844fcc45a0cb21f16cfc23d283777da499b22f2a41f3d7f9"
     end
   end
 
   on_linux do
     if Hardware::CPU.intel?
       url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmpass-linux-amd64.tar.gz"
-      sha256 "07d87b610fdfa3fab34f09e3cb8fe53a0efe41855798e36c339722ec025809e7"
+      sha256 "b8824dce1a67843178987f8cd184a0569be1cfca51a5349edfc896ffbfdd373a"
     elsif Hardware::CPU.arm?
       url "https://github.com/Sn0wAlice/GetMyPass/releases/download/v#{version}/gmpass-linux-arm64.tar.gz"
-      sha256 "75de21ec30df03c8a0463985d8705f28d04918a54818fbb05a5029533f993a0c"
+      sha256 "d138cb955145bf3c8a8ee1bda99f4a529d530549506add0a04da85ac88547aac"
     end
   end
 
