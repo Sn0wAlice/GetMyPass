@@ -1,17 +1,23 @@
 use crate::app::{
-    App, EntryField, InputMode, PasswordChangeStep, Screen, SettingsItem, Tab, SETTINGS_ITEMS,
+    App, EntryField, InputMode, PasswordChangeStep, Screen, SetupStep, SettingsItem, Tab,
+    SETTINGS_ITEMS,
 };
 use crate::clipboard::copy_to_clipboard;
 use crate::config::save_config;
 use crate::vault::{
-    change_master_password, export_vault_json, import_vault_json, save_vault_with_backup,
-    EntryKind,
+    change_master_password, export_vault_json, import_vault_json, load_vault, save_vault,
+    save_vault_with_backup, EntryKind,
 };
 use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     app.touch_activity();
     app.clear_expired_status();
+
+    if matches!(app.screen, Screen::InitialUnlock | Screen::InitialSetup) {
+        handle_initial_password(app, key);
+        return;
+    }
 
     if app.screen == Screen::Locked {
         handle_locked(app, key);
@@ -55,7 +61,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         Screen::ChangePassword => handle_change_password(app, key),
         Screen::ImportPath => handle_import_path(app, key),
         Screen::Stats => handle_stats(app, key),
-        Screen::Locked => {}
+        Screen::Locked | Screen::InitialUnlock | Screen::InitialSetup => {}
     }
 }
 
@@ -74,6 +80,106 @@ fn handle_locked(app: &mut App, key: KeyEvent) {
             app.should_quit = true;
         }
         _ => {}
+    }
+}
+
+fn handle_initial_password(app: &mut App, key: KeyEvent) {
+    if app.screen == Screen::InitialUnlock {
+        match key.code {
+            KeyCode::Enter => {
+                if app.initial_password_input.is_empty() {
+                    app.initial_error = Some("Password cannot be empty.".into());
+                    return;
+                }
+                match load_vault(&app.initial_password_input) {
+                    Ok(vault) => {
+                        let pw = app.initial_password_input.clone();
+                        app.finalize_unlock(vault, pw);
+                    }
+                    Err(_) => {
+                        app.initial_attempts += 1;
+                        app.initial_password_input.clear();
+                        if app.initial_attempts >= 3 {
+                            app.should_quit = true;
+                        } else {
+                            app.initial_error = Some(format!(
+                                "Wrong password ({}/3 attempts)",
+                                app.initial_attempts
+                            ));
+                        }
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                app.initial_password_input.pop();
+                app.initial_error = None;
+            }
+            KeyCode::Char(c) => {
+                app.initial_password_input.push(c);
+                app.initial_error = None;
+            }
+            KeyCode::Esc => {
+                app.should_quit = true;
+            }
+            _ => {}
+        }
+    } else {
+        // InitialSetup
+        match app.initial_setup_step {
+            SetupStep::NewPassword => match key.code {
+                KeyCode::Enter => {
+                    if app.initial_password_input.len() < 8 {
+                        app.initial_error =
+                            Some("Password must be at least 8 characters.".into());
+                    } else {
+                        app.initial_error = None;
+                        app.initial_setup_step = SetupStep::ConfirmPassword;
+                    }
+                }
+                KeyCode::Backspace => {
+                    app.initial_password_input.pop();
+                    app.initial_error = None;
+                }
+                KeyCode::Char(c) => {
+                    app.initial_password_input.push(c);
+                    app.initial_error = None;
+                }
+                KeyCode::Esc => {
+                    app.should_quit = true;
+                }
+                _ => {}
+            },
+            SetupStep::ConfirmPassword => match key.code {
+                KeyCode::Enter => {
+                    if app.initial_password_confirm != app.initial_password_input {
+                        app.initial_error = Some("Passwords do not match.".into());
+                        app.initial_password_confirm.clear();
+                    } else {
+                        let vault = crate::vault::Vault::new();
+                        let pw = app.initial_password_input.clone();
+                        if let Err(e) = save_vault(&vault, &pw) {
+                            app.initial_error = Some(format!("Error creating vault: {}", e));
+                            return;
+                        }
+                        app.finalize_unlock(vault, pw);
+                    }
+                }
+                KeyCode::Backspace => {
+                    app.initial_password_confirm.pop();
+                    app.initial_error = None;
+                }
+                KeyCode::Char(c) => {
+                    app.initial_password_confirm.push(c);
+                    app.initial_error = None;
+                }
+                KeyCode::Esc => {
+                    app.initial_setup_step = SetupStep::NewPassword;
+                    app.initial_password_confirm.clear();
+                    app.initial_error = None;
+                }
+                _ => {}
+            },
+        }
     }
 }
 

@@ -22,6 +22,8 @@ pub enum Screen {
     Locked,
     ImportPath,
     Stats,
+    InitialUnlock,
+    InitialSetup,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,6 +165,12 @@ impl SettingsItem {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum SetupStep {
+    NewPassword,
+    ConfirmPassword,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum PasswordChangeStep {
     CurrentPassword,
     NewPassword,
@@ -254,20 +262,32 @@ pub struct App {
 
     // View entry
     pub show_history: bool,
+
+    // Initial unlock / setup
+    pub initial_password_input: String,
+    pub initial_password_confirm: String,
+    pub initial_setup_step: SetupStep,
+    pub initial_error: Option<String>,
+    pub initial_attempts: u8,
 }
 
 impl App {
-    pub fn new(vault: Vault, master_password: String, config: Config) -> Self {
+    pub fn new_locked(vault_exists: bool, config: Config) -> Self {
         let now = Instant::now();
         let theme = Theme::from_name(&config.theme);
         let gen_length = config.default_gen_length;
-        let mut app = Self {
-            vault,
-            master_password,
+        let screen = if vault_exists {
+            Screen::InitialUnlock
+        } else {
+            Screen::InitialSetup
+        };
+        Self {
+            vault: Vault::new(),
+            master_password: String::new(),
             config,
             theme,
             active_tab: Tab::Vault,
-            screen: Screen::List,
+            screen,
             input_mode: InputMode::Normal,
             should_quit: false,
             dirty: false,
@@ -304,9 +324,25 @@ impl App {
             clipboard_clear_at: None,
             import_path_input: String::new(),
             show_history: false,
-        };
-        app.update_filter();
-        app
+            initial_password_input: String::new(),
+            initial_password_confirm: String::new(),
+            initial_setup_step: SetupStep::NewPassword,
+            initial_error: None,
+            initial_attempts: 0,
+        }
+    }
+
+    pub fn finalize_unlock(&mut self, vault: Vault, master_password: String) {
+        self.vault = vault;
+        self.master_password = master_password;
+        self.initial_password_input.clear();
+        self.initial_password_confirm.clear();
+        self.initial_error = None;
+        self.screen = Screen::List;
+        self.input_mode = InputMode::Normal;
+        self.active_tab = Tab::Vault;
+        self.last_activity = Instant::now();
+        self.update_filter();
     }
 
     pub fn touch_activity(&mut self) {
@@ -314,7 +350,10 @@ impl App {
     }
 
     pub fn check_auto_lock(&mut self) {
-        if self.config.auto_lock_seconds == 0 || self.locked {
+        if self.config.auto_lock_seconds == 0
+            || self.locked
+            || matches!(self.screen, Screen::InitialUnlock | Screen::InitialSetup)
+        {
             return;
         }
         if self.last_activity.elapsed().as_secs() >= self.config.auto_lock_seconds {

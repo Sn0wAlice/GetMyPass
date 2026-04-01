@@ -1,5 +1,5 @@
 use crate::app::{
-    App, EntryField, InputMode, ListRow, PasswordChangeStep, Screen, SettingsItem, Tab,
+    App, EntryField, InputMode, ListRow, PasswordChangeStep, Screen, SetupStep, SettingsItem, Tab,
     SETTINGS_ITEMS,
 };
 use crate::vault::{password_strength_score, EntryKind};
@@ -14,11 +14,6 @@ use ratatui::{
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn draw(f: &mut Frame, app: &App) {
-    if app.screen == Screen::Locked {
-        draw_locked(f, app);
-        return;
-    }
-
     let area = f.area();
 
     // Small terminal check
@@ -39,6 +34,16 @@ pub fn draw(f: &mut Frame, app: &App) {
         ])
         .block(Block::default().borders(Borders::ALL));
         f.render_widget(msg, area);
+        return;
+    }
+
+    if matches!(app.screen, Screen::InitialUnlock | Screen::InitialSetup) {
+        draw_initial_password(f, app);
+        return;
+    }
+
+    if app.screen == Screen::Locked {
+        draw_locked(f, app);
         return;
     }
 
@@ -383,28 +388,38 @@ fn draw_view(f: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Min(5), Constraint::Length(3)])
         .split(area);
 
+    let inner_width = chunks[0].width.saturating_sub(2) as usize;
+    let separator = "─".repeat(inner_width.saturating_sub(4));
+
     let icon = match entry.kind {
         EntryKind::Password => "[P]",
         EntryKind::Note => "[N]",
     };
-    let fav = if entry.favorite { " *" } else { "" };
+    let fav = if entry.favorite { " ★" } else { "" };
 
-    let mut lines = vec![Line::from("")];
+    let mut lines: Vec<Line> = Vec::new();
+
+    // ── Header section ──
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            format!("{} {}{}", icon, entry.name, fav),
+            Style::default()
+                .fg(t.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
 
     if !entry.folder.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("  Folder:       ", Style::default().fg(t.accent)),
+            Span::raw("  "),
             Span::styled(
                 format!("/{}", &entry.folder),
                 Style::default().fg(t.folder),
             ),
         ]));
     }
-
-    lines.push(Line::from(vec![
-        Span::styled("  Name:         ", Style::default().fg(t.accent)),
-        Span::styled(&entry.name, Style::default().add_modifier(Modifier::BOLD)),
-    ]));
 
     if !entry.tags.is_empty() {
         let tags_display = entry
@@ -414,22 +429,29 @@ fn draw_view(f: &mut Frame, app: &App, area: Rect) {
             .collect::<Vec<_>>()
             .join(" ");
         lines.push(Line::from(vec![
-            Span::styled("  Tags:         ", Style::default().fg(t.accent)),
+            Span::raw("  "),
             Span::styled(tags_display, Style::default().fg(t.tag)),
         ]));
     }
 
+    lines.push(Line::from(Span::styled(
+        format!("  {}", separator),
+        Style::default().fg(t.muted),
+    )));
+
+    // ── Credentials section ──
     match entry.kind {
         EntryKind::Password => {
-            lines.push(Line::from(vec![
-                Span::styled("  Username:     ", Style::default().fg(t.accent)),
-                Span::raw(&entry.username),
-            ]));
+            if !entry.username.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("  User  ", Style::default().fg(t.muted)),
+                    Span::raw(&entry.username),
+                ]));
+            }
 
-            lines.push(Line::from(""));
             if app.show_password {
                 lines.push(Line::from(vec![
-                    Span::styled("  Password:     ", Style::default().fg(t.accent)),
+                    Span::styled("  Pass  ", Style::default().fg(t.muted)),
                     Span::styled(
                         &entry.password,
                         Style::default()
@@ -441,55 +463,48 @@ fn draw_view(f: &mut Frame, app: &App, area: Rect) {
                     password_strength_score(&entry.password);
                 let strength_color = strength_color_from_label(strength_label);
                 lines.push(Line::from(vec![
-                    Span::raw("                "),
+                    Span::raw("        "),
                     Span::styled(
                         format!("{} {}", strength_bar, strength_label),
                         Style::default().fg(strength_color),
                     ),
-                    Span::styled(
-                        "  -- p to hide",
-                        Style::default().fg(t.muted),
-                    ),
                 ]));
             } else {
-                let dots = "*".repeat(entry.password.len().clamp(8, 20));
+                let dots = "●".repeat(entry.password.len().clamp(8, 16));
                 lines.push(Line::from(vec![
-                    Span::styled("  Password:     ", Style::default().fg(t.accent)),
+                    Span::styled("  Pass  ", Style::default().fg(t.muted)),
                     Span::styled(dots, Style::default().fg(t.muted)),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::raw("                "),
                     Span::styled(
-                        "Hidden -- press p to reveal",
+                        "  p to reveal",
                         Style::default().fg(t.active),
                     ),
                 ]));
             }
-            lines.push(Line::from(""));
 
-            lines.push(Line::from(vec![
-                Span::styled("  URL:          ", Style::default().fg(t.accent)),
-                Span::raw(&entry.url),
-            ]));
+            if !entry.url.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("  URL   ", Style::default().fg(t.muted)),
+                    Span::raw(&entry.url),
+                ]));
+            }
 
             // TOTP
             if !entry.totp_secret.is_empty() {
-                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", separator),
+                    Style::default().fg(t.muted),
+                )));
                 if let Some((code, remaining)) =
                     crate::totp::generate_totp(&entry.totp_secret)
                 {
-                    let formatted_code = format!(
-                        "{} {}",
-                        &code[..3],
-                        &code[3..]
-                    );
-                    // Progress bar
+                    let formatted_code =
+                        format!("{} {}", &code[..3], &code[3..]);
                     let filled = (remaining as usize * 20 / 30).min(20);
                     let empty = 20 - filled;
                     let bar = format!(
                         "{}{}",
-                        "#".repeat(filled),
-                        "-".repeat(empty)
+                        "█".repeat(filled),
+                        "░".repeat(empty)
                     );
                     let bar_color = if remaining <= 5 {
                         t.error
@@ -499,7 +514,7 @@ fn draw_view(f: &mut Frame, app: &App, area: Rect) {
                         t.success
                     };
                     lines.push(Line::from(vec![
-                        Span::styled("  TOTP:         ", Style::default().fg(t.accent)),
+                        Span::styled("  TOTP  ", Style::default().fg(t.muted)),
                         Span::styled(
                             formatted_code,
                             Style::default()
@@ -507,46 +522,40 @@ fn draw_view(f: &mut Frame, app: &App, area: Rect) {
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
-                            format!("  ({}s)", remaining),
+                            format!("  {}s ", remaining),
                             Style::default().fg(t.muted),
                         ),
-                    ]));
-                    lines.push(Line::from(vec![
-                        Span::raw("                "),
-                        Span::styled(
-                            format!("[{}]", bar),
-                            Style::default().fg(bar_color),
-                        ),
+                        Span::styled(bar, Style::default().fg(bar_color)),
                     ]));
                 } else {
                     lines.push(Line::from(vec![
-                        Span::styled("  TOTP:         ", Style::default().fg(t.accent)),
-                        Span::styled(
-                            "Invalid secret",
-                            Style::default().fg(t.error),
-                        ),
+                        Span::styled("  TOTP  ", Style::default().fg(t.muted)),
+                        Span::styled("Invalid secret", Style::default().fg(t.error)),
                     ]));
                 }
             }
 
             // Password history
             if !entry.password_history.is_empty() {
-                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", separator),
+                    Style::default().fg(t.muted),
+                )));
                 if app.show_history {
-                    lines.push(Line::from(Span::styled(
-                        format!(
-                            "  Password History ({}) -- H to hide:",
-                            entry.password_history.len()
+                    lines.push(Line::from(vec![
+                        Span::styled("  History ", Style::default().fg(t.muted)),
+                        Span::styled(
+                            format!("({} entries)", entry.password_history.len()),
+                            Style::default().fg(t.muted),
                         ),
-                        Style::default().fg(t.accent),
-                    )));
+                    ]));
                     for item in entry.password_history.iter().rev().take(5) {
                         let date = chrono::DateTime::from_timestamp(item.changed_at, 0)
                             .map(|d| d.format("%Y-%m-%d").to_string())
                             .unwrap_or_default();
                         lines.push(Line::from(vec![
                             Span::styled(
-                                format!("    {}  ", date),
+                                format!("    {} ", date),
                                 Style::default().fg(t.muted),
                             ),
                             Span::styled(
@@ -556,40 +565,49 @@ fn draw_view(f: &mut Frame, app: &App, area: Rect) {
                         ]));
                     }
                 } else {
-                    lines.push(Line::from(Span::styled(
-                        format!(
-                            "  Password History ({}) -- press H to show",
-                            entry.password_history.len()
+                    lines.push(Line::from(vec![
+                        Span::styled("  History ", Style::default().fg(t.muted)),
+                        Span::styled(
+                            format!("{} entries ", entry.password_history.len()),
+                            Style::default().fg(t.muted),
                         ),
-                        Style::default().fg(t.muted),
-                    )));
+                        Span::styled("H to show", Style::default().fg(t.active)),
+                    ]));
                 }
             }
         }
         EntryKind::Note => {}
     }
 
+    // ── Notes section ──
     if !entry.notes.is_empty() {
-        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "  Notes:",
-            Style::default().fg(t.accent),
+            format!("  {}", separator),
+            Style::default().fg(t.muted),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Notes",
+            Style::default().fg(t.muted),
         )));
         for note_line in entry.notes.lines() {
-            lines.push(Line::from(format!("    {}", note_line)));
+            lines.push(Line::from(format!("  {}", note_line)));
         }
     }
 
+    // ── Footer ──
     lines.push(Line::from(""));
     let modified = chrono::DateTime::from_timestamp(entry.modified_at, 0)
         .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default();
     lines.push(Line::from(vec![
-        Span::styled("  Modified:     ", Style::default().fg(t.muted)),
-        Span::styled(modified, Style::default().fg(t.muted)),
+        Span::raw("  "),
+        Span::styled(
+            format!("Modified {}", modified),
+            Style::default().fg(t.muted),
+        ),
     ]));
 
-    let title = format!(" {} {}{} ", icon, entry.name, fav);
+    let title = format!(" {} Detail ", icon);
     let view = Paragraph::new(lines)
         .block(
             Block::default()
@@ -604,7 +622,7 @@ fn draw_view(f: &mut Frame, app: &App, area: Rect) {
         .wrap(Wrap { trim: false });
     f.render_widget(view, chunks[0]);
 
-    // Help
+    // Help bar
     let help_text = match &app.status_message {
         Some((msg, _)) => {
             Line::from(Span::styled(msg.as_str(), Style::default().fg(t.success)))
@@ -612,26 +630,26 @@ fn draw_view(f: &mut Frame, app: &App, area: Rect) {
         None => Line::from(vec![
             Span::styled(" p", Style::default().fg(t.active)),
             Span::raw(if app.show_password {
-                " hide "
+                " hide"
             } else {
-                " reveal "
+                " reveal"
             }),
-            Span::styled("1", Style::default().fg(t.active)),
-            Span::raw(" pw "),
-            Span::styled("2", Style::default().fg(t.active)),
-            Span::raw(" user "),
-            Span::styled("f", Style::default().fg(t.active)),
-            Span::raw(" fav "),
-            Span::styled("e", Style::default().fg(t.active)),
-            Span::raw(" edit "),
-            Span::styled("H", Style::default().fg(t.active)),
-            Span::raw(" history "),
-            Span::styled("Esc", Style::default().fg(t.active)),
+            Span::styled("  1", Style::default().fg(t.active)),
+            Span::raw(" pw"),
+            Span::styled("  2", Style::default().fg(t.active)),
+            Span::raw(" user"),
+            Span::styled("  f", Style::default().fg(t.active)),
+            Span::raw(" fav"),
+            Span::styled("  e", Style::default().fg(t.active)),
+            Span::raw(" edit"),
+            Span::styled("  H", Style::default().fg(t.active)),
+            Span::raw(" history"),
+            Span::styled("  Esc", Style::default().fg(t.active)),
             Span::raw(" back"),
         ]),
     };
     let help = Paragraph::new(help_text).block(
-        Block::default().borders(Borders::ALL).title(" Help "),
+        Block::default().borders(Borders::ALL),
     );
     f.render_widget(help, chunks[1]);
 }
@@ -1116,6 +1134,134 @@ fn settings_hint(item: &SettingsItem) -> String {
 }
 
 // ─── Locked ───────────────────────────────────────────────────────────
+
+fn draw_initial_password(f: &mut Frame, app: &App) {
+    let t = &app.theme;
+    let area = f.area();
+    let popup_area = centered_rect(60, 40, area);
+
+    let bg = Paragraph::new("").style(Style::default().bg(Color::Black));
+    f.render_widget(bg, area);
+    f.render_widget(Clear, popup_area);
+
+    let is_unlock = app.screen == Screen::InitialUnlock;
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(""),
+    ];
+
+    if is_unlock {
+        lines.push(Line::from(Span::styled(
+            "       ENTER MASTER PASSWORD",
+            Style::default()
+                .fg(t.active)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("   Password: ", Style::default().fg(t.accent)),
+            Span::raw("*".repeat(app.initial_password_input.len())),
+        ]));
+        lines.push(Line::from(""));
+    } else {
+        let step_label = match app.initial_setup_step {
+            SetupStep::NewPassword => "Choose a master password (min 8 chars)",
+            SetupStep::ConfirmPassword => "Confirm master password",
+        };
+        lines.push(Line::from(Span::styled(
+            "       CREATE NEW VAULT",
+            Style::default()
+                .fg(t.active)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("   {}", step_label),
+            Style::default().fg(t.accent),
+        )));
+        lines.push(Line::from(""));
+
+        let input = match app.initial_setup_step {
+            SetupStep::NewPassword => &app.initial_password_input,
+            SetupStep::ConfirmPassword => &app.initial_password_confirm,
+        };
+        lines.push(Line::from(vec![
+            Span::styled("   Password: ", Style::default().fg(t.accent)),
+            Span::raw("*".repeat(input.len())),
+        ]));
+        lines.push(Line::from(""));
+
+        if app.initial_setup_step == SetupStep::NewPassword
+            && !app.initial_password_input.is_empty()
+        {
+            let (_, label, bar) = password_strength_score(&app.initial_password_input);
+            let color = strength_color_from_label(label);
+            lines.push(Line::from(vec![
+                Span::styled("   Strength: ", Style::default().fg(t.muted)),
+                Span::styled(
+                    format!("{} {}", bar, label),
+                    Style::default().fg(color),
+                ),
+            ]));
+            lines.push(Line::from(""));
+        }
+    }
+
+    if let Some(err) = &app.initial_error {
+        lines.push(Line::from(Span::styled(
+            format!("   {}", err),
+            Style::default().fg(t.error),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    if is_unlock {
+        lines.push(Line::from(vec![
+            Span::styled("   Enter", Style::default().fg(t.active)),
+            Span::raw(" unlock  "),
+            Span::styled("Esc", Style::default().fg(t.active)),
+            Span::raw(" quit"),
+        ]));
+    } else {
+        match app.initial_setup_step {
+            SetupStep::NewPassword => {
+                lines.push(Line::from(vec![
+                    Span::styled("   Enter", Style::default().fg(t.active)),
+                    Span::raw(" continue  "),
+                    Span::styled("Esc", Style::default().fg(t.active)),
+                    Span::raw(" quit"),
+                ]));
+            }
+            SetupStep::ConfirmPassword => {
+                lines.push(Line::from(vec![
+                    Span::styled("   Enter", Style::default().fg(t.active)),
+                    Span::raw(" confirm  "),
+                    Span::styled("Esc", Style::default().fg(t.active)),
+                    Span::raw(" back"),
+                ]));
+            }
+        }
+    }
+
+    let title = if is_unlock {
+        " GetMyPass "
+    } else {
+        " GetMyPass - New Vault "
+    };
+
+    let popup = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .title_style(
+                Style::default()
+                    .fg(t.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+    );
+    f.render_widget(popup, popup_area);
+}
 
 fn draw_locked(f: &mut Frame, app: &App) {
     let t = &app.theme;

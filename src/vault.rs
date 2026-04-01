@@ -128,15 +128,15 @@ pub fn password_strength_score(password: &str) -> (u8, &'static str, &'static st
         .count();
 
     if len >= 16 && variety >= 3 {
-        (4, "Strong", "||||")
+        (4, "Strong", "████")
     } else if len >= 12 && variety >= 2 {
-        (3, "Good", "|||")
+        (3, "Good", "███░")
     } else if len >= 8 && variety >= 2 {
-        (2, "Fair", "||")
+        (2, "Fair", "██░░")
     } else if len >= 8 {
-        (1, "Weak", "|")
+        (1, "Weak", "█░░░")
     } else {
-        (0, "Too short", "")
+        (0, "Too short", "░░░░")
     }
 }
 
